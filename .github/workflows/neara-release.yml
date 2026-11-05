@@ -1,0 +1,104 @@
+name: Neara ECR release
+
+on:
+  push:
+    branches: [neara-release]
+  workflow_dispatch:
+  schedule:
+    - cron: '0 10 25 * *' # Monthly at 10:00 UTC on the 25th.
+
+permissions: {}
+
+jobs:
+  rebuild:
+    # Schedules run on main; dispatch on the branch trusted by the ECR role.
+    if: github.repository == 'Neara-Software/docker-sqitch' && github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Trigger release branch rebuild
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh workflow run neara-release.yml --repo "$GH_REPO" --ref neara-release
+
+  publish:
+    if: github.repository == 'Neara-Software/docker-sqitch' && github.ref == 'refs/heads/neara-release'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: ap-southeast-2
+      ECR_ROLE_ARN: ${{ vars.CICD_ECR_ROLE_ARN }}
+      ECR_REPOSITORY: ${{ vars.CICD_ECR_REPOSITORY }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Prepare release
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${ECR_ROLE_ARN:?Set the CICD_ECR_ROLE_ARN repository variable}"
+          : "${ECR_REPOSITORY:?Set the CICD_ECR_REPOSITORY repository variable}"
+          source .envrc
+          echo "SQITCH_VERSION=$VERSION" >> "$GITHUB_ENV"
+          # ECR tags are immutable. Include the run and attempt so reruns can publish.
+          echo "IMAGE_TAG=${VERSION}-${GITHUB_SHA}-r${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_ENV"
+
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build smoke-test image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          pull: true
+          no-cache: true
+          provenance: false
+          load: true
+          tags: sqitch:release-test
+          build-args: VERSION=${{ env.SQITCH_VERSION }}
+
+      - name: Check Sqitch version and PostgreSQL driver
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm sqitch:release-test --version | grep -F "${SQITCH_VERSION#v}"
+          docker run --rm --entrypoint perl sqitch:release-test -MDBD::Pg -e 'print "$DBD::Pg::VERSION\n"'
+
+      - name: Assume CICD ECR push role
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.ECR_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to CICD ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push release
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          pull: true
+          no-cache: true
+          provenance: false
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
+          build-args: VERSION=${{ env.SQITCH_VERSION }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ env.SQITCH_VERSION }}
+
+      - name: Record published image
+        env:
+          IMAGE: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          echo "Image: \`$IMAGE:$IMAGE_TAG\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "Digest: \`$IMAGE@$DIGEST\`" >> "$GITHUB_STEP_SUMMARY"
