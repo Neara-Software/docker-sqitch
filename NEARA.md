@@ -7,7 +7,7 @@ PostgreSQL driver before publishing. Upstream Docker Hub jobs are skipped
 in the Neara fork.
 
 The same workflow runs on `main` at 10:00 UTC on the 25th of each month.
-Its `rebuild` job dispatches itself on `neara-release`, where the `publish` job
+Its `dispatch-release` job dispatches itself on `neara-release`, where the `rebuild` job
 builds and pushes using that branch's OIDC identity. The dispatch job needs only
 Actions write permission. Running the workflow manually on `main` also dispatches
 a release build; running it on `neara-release` builds directly.

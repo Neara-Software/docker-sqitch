@@ -10,7 +10,7 @@ on:
 permissions: {}
 
 jobs:
-  rebuild:
+  dispatch-release:
     # Schedules run on main; dispatch on the branch trusted by the ECR role.
     if: github.repository == 'Neara-Software/docker-sqitch' && github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
@@ -23,7 +23,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: gh workflow run neara-release.yml --repo "$GH_REPO" --ref neara-release
 
-  publish:
+  rebuild:
     if: github.repository == 'Neara-Software/docker-sqitch' && github.ref == 'refs/heads/neara-release'
     runs-on: ubuntu-latest
     permissions:
