@@ -7,6 +7,7 @@ on:
 
 jobs:
   build:
+    if: github.repository == 'sqitchers/docker-sqitch'
     # https://docs.docker.com/build/ci/github-actions/multi-platform/
     name: 📦 Build and Push to Docker Hub
     runs-on: ubuntu-latest
@@ -79,6 +80,7 @@ jobs:
           build-args: VERSION=${{ env.VERSION }}
 
   clickhouse:
+    if: github.repository == 'sqitchers/docker-sqitch'
     # https://docs.docker.com/build/ci/github-actions/multi-platform/
     name: 🏠 Build and Push ClickHouse Image
     runs-on: ubuntu-latest
